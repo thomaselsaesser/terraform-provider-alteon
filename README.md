@@ -1,97 +1,135 @@
-# Phase 0 + 1 — Fundament und VRRP
+# terraform-provider-alteon — Erweiterung Phase 0–6
 
-Stand: kompiliert sauber (`go build ./...` und `go vet ./alteon/` → exit 0) gegen
-`github.com/Radware/radware_go_sdk` und terraform-plugin-sdk/v2 v2.34.0.
+Vollständiger Stand. Kompiliert sauber (`go build ./...`, `go vet ./alteon/` → exit 0)
+und baut als statische `linux/amd64`-Binary (`CGO_ENABLED=0`, ELF, statically linked,
+stripped) gegen `github.com/Radware/radware_go_sdk` und terraform-plugin-sdk/v2 v2.34.0.
 
-## Gelieferte Dateien
+Alle REST-Tabellennamen, Felder und Enums wurden gegen die RDWRAlteonRestDoc
+(FW 34.0.9+) verifiziert. Wo etwas nicht aus der Doku belegbar war, ist es als
+offener, am Gerät zu klärender Punkt markiert — nichts geraten.
 
-- `helpers.go` — Phase 0, gemeinsame CRUD-Helfer (neu)
-- `resource_alteon_vrrp.go` — Phase 1, Virtual Router (neu)
-- `resource_alteon_vrrp_group.go` — Phase 1, Switch-Based VR Group (neu)
-- `provider.go` — zwei Zeilen in der ResourcesMap ergänzt (geändert)
+## Neue Dateien (nach alteon/ kopieren)
 
-Die drei neuen Dateien kommen nach `alteon/`. In `provider.go` sind nur die
-beiden Registrierungszeilen neu — Diff:
+| Datei | Inhalt |
+|-------|--------|
+| `helpers.go` | Phase 0: CRUD-Helfer, Enum/Bool-Mapping, Bitmap-Dekoder, Set-Delta |
+| `resource_alteon_vrrp.go` | Phase 1: Virtual Router |
+| `resource_alteon_vrrp_group.go` | Phase 1: Switch-Based VR Group |
+| `advhc_common.go` | Phase 2: generischer AdvHC-Builder |
+| `advhc_types.go` | Phase 2: alle HC-Typen (tcp, icmp, udp, dns, http, smtp, sslhello, ldap, radius, arp, link, script) |
+| `resource_alteon_pip.go` | Phase 3: PIP (Bitmap-Delta) + Peer-PIP |
+| `resource_alteon_data_class.go` | Phase 4: Data Class + manual entries |
+| `resource_alteon_content_class.go` | Phase 4: Content Class + 8 Match-Subtabellen |
+| `resource_alteon_filter.go` | Phase 5: Filter + Filter-Port + Redirect-Mapping |
+| `resource_alteon_appshape.go` | Phase 6: AppShape-Script + Binding |
+| `provider.go` | alle 24 neuen Ressourcen registriert (geändert) |
+
+## Registrierte Ressourcen (24 neu)
 
 ```
-  "alteon_https_health_check": resource_alteon_https_health_check(),
-+ "alteon_vrrp":               resource_alteon_vrrp(),
-+ "alteon_vrrp_group":         resource_alteon_vrrp_group(),
+alteon_vrrp, alteon_vrrp_group
+alteon_advhc_tcp, _icmp, _udp, _dns, _http, _smtp, _sslhello, _ldap, _radius, _arp, _link, _script
+alteon_pip, alteon_peer_pip
+alteon_data_class, alteon_content_class
+alteon_filter, alteon_filter_port, alteon_filter_redirect_mapping
+alteon_appshape_script, alteon_appshape_binding
 ```
 
-## Phase 0 — helpers.go
+Durchgängiges Designprinzip (mit dir abgestimmt): flaches Schema, echter Read
+(Drift-Detection), DELETE-Methode zum Löschen, 1/2-Enums als bool, explizite Indizes.
+Die bestehende `alteon_https_health_check` bleibt unangetastet; `alteon_advhc_http`
+deckt HTTP **und** HTTPS ab und kann sie perspektivisch per `state mv` ablösen.
 
-Bündelt das CRUD-Boilerplate, das im Altbestand in jeder Ressource dupliziert war:
+## Am Gerät zu verifizieren (in den Dateien als HINWEIS markiert)
 
-- `configPath(table, key)` — baut `/config/<Table>/<Key>/`
-- `writeItem(...)` — POST (Create) bzw. PUT (Update), einheitliche Antwortprüfung
-  (HTTP 200 UND Body `"status":"ok"`)
-- `deleteItem(...)` — echtes HTTP DELETE (von Radware empfohlen statt DeleteStatus:2)
-- `readItem(...)` — GET, parst `{"<Table>":[{...}]}`; liefert `found=false` bei
-  404 / leerer Antwort / `"status":"err"` → Aufrufer setzt dann `d.SetId("")`
-  (Drift: Objekt am Gerät gelöscht)
-- `boolToEnable` / `enableToBool` — 1/2-Enum ↔ bool
-- `asInt` / `asString` — robustes Lesen der JSON-Werte (JSON-Zahlen sind float64)
+1. **PIP-Bitmap-Nummerierung** (`resource_alteon_pip.go`, `decodeHexBitmap` in
+   `helpers.go`): Format Hex-Byte-Bitmap ist sicher; die MSB-first/1-basierte
+   Bit→Port/VLAN-Nummer ist die übliche Konvention, sollte aber gegen eine PIP mit
+   bekannter Port-/VLAN-Zuordnung geprüft werden. Gleiches gilt für `FiltBmap` in
+   `alteon_filter_port`.
+2. **Content-Class-Aktiv-Flags**: Ob die Haupttabellen-Flags (HostName=1/2 …)
+   automatisch beim Schreiben einer Subtabelle gesetzt werden, oder explizit gesetzt
+   werden müssen. Aktuell verlassen wir uns auf automatisches Setzen.
+3. **AppShape-Skript-INHALT**: In der vorliegenden Doku ist KEIN REST-Endpunkt zum
+   Setzen des Skript-Codes belegt (nur Metadaten Name/State/Default). `alteon_appshape_script`
+   verwaltet daher nur die Metadaten. Sobald der Upload-Mechanismus am Gerät geklärt
+   ist, lässt sich ein `content`-Feld ergänzen. Bewusst nicht geraten.
+4. **Entry-Drift**: Bei Data Class und Content Class wird Drift auf Kopf-Ebene
+   erkannt; die nested entries werden im State belassen wie konfiguriert. Ein
+   vollständiger Subtabellen-Read (gefiltert nach Parent-ID) kann bei Bedarf ergänzt
+   werden, falls ihr Out-of-band-Änderungen an Einträgen erkennen wollt.
 
-## Phase 1 — VRRP
+## Bauen & Transfer
 
-Zwei flache Ressourcen mit echtem Read (Drift-Detection), wie abgestimmt:
+Siehe `BUILD_UND_TRANSFER.md` (3-Rechner-Workflow). Kurz:
+```bash
+make vendor    # einmalig mit Internet
+make build     # statische linux/amd64-Binary
+make dist      # Binary + sha256 fuer lbmgmt
+```
 
-### Designentscheidungen (umgesetzt)
-- **`index` (Indx) und `vrid` (ID) getrennt** — beide Pflichtfelder, weil sie bei
-  euch historisch teils auseinanderlaufen. `index` ist `ForceNew` (Key-Änderung =
-  Neuanlage).
-- **Explizite Index-Vergabe** — keine Auto-Vergabe.
-- **Flaches Schema** statt `elements`-Block.
-- **1/2-Enums als bool** — `preempt`, `state`, `sharing`, alle `track_*`.
-  `track_isl_port_include` mappt 1=include/2=exclude.
-- **`version`** als `"v4"`/`"v6"` (intern 1/2).
-- **Import** via `terraform import alteon_vrrp.<name> <index>`.
+## Mitgelieferte Test-Binary
 
-### alteon_vrrp (vrrpNewCfgVirtRtrTable)
-Voller Feldsatz inkl. `addr`, `ipv6_addr`, `if_index`, `interval`, `priority`,
-`ospf_cost` und alle neun Tracking-Flags.
+`terraform-provider-alteon.linux-amd64` (+ .sha256) ist die in dieser Sitzung
+gebaute statische Binary. Du kannst sie direkt auf lbmgmt testen — ich empfehle aber,
+nach dem `make vendor` auf deinem Build-Rechner neu zu bauen, damit Binary und
+gepushter Sourcecode garantiert aus demselben Stand stammen.
 
-### alteon_vrrp_group (vrrpNewCfgVirtRtrGrpTable)
-Feldgleich, aber **ohne** `addr`/`ipv6_addr` (die Gruppe trägt keine eigene IP).
-
-## HCL-Beispiel
+## HCL-Beispiele (Auszug)
 
 ```hcl
-resource "alteon_vrrp" "vr_web" {
-  index    = 1            # /c/l3/vrrp/vr 1  (Tabellen-Key Indx)
-  vrid     = 10           # VRID auf dem Draht (ID) — darf abweichen
-  addr     = "10.12.188.1"
-  if_index = 1
-  priority = 100
-  preempt  = true
-  state    = true
-
-  track_ip_intf     = true
-  track_real_server = true
+resource "alteon_advhc_http" "web" {
+  id_name        = "hc-web"
+  dport          = 443
+  https          = true
+  method         = "get"
+  path           = "/health"
+  response_code  = "200"
+  receive_string = "OK"
+  interval       = 5
+  retries        = 3
 }
 
-resource "alteon_vrrp_group" "grp_ha" {
-  index    = 1
-  vrid     = 1
-  if_index = 1
-  priority = 100
-  preempt  = true
+resource "alteon_pip" "pip1" {
+  address = "10.12.188.53"
+  ports   = [1, 2]
+  vlans   = [100]
+}
+
+resource "alteon_data_class" "blocklist" {
+  id_name   = "bad-ips"
+  data_type = "ip"
+  entry { id = 1  key = "203.0.113.5" }
+  entry { id = 2  key = "198.51.100.9" }
+}
+
+resource "alteon_content_class" "api" {
+  id_name = "cc-api"
+  path {
+    id         = "1"
+    file_path  = "/api/"
+    match_type = "prefx"
+  }
+}
+
+resource "alteon_filter" "allow_web" {
+  index    = 100
+  action   = "allow"
+  protocol = 6
+  dst_port_low  = 443
+  dst_port_high = 443
   state    = true
 }
-```
 
-## Hinweis zum lokalen Bauen
-
-In der Build-Sandbox waren die Go-Vanity-Domains (`golang.org/x/*`,
-`google.golang.org/*`, `gopkg.in/*`) gesperrt. Für den Testbuild wurden temporäre
-`replace`-Direktiven auf GitHub-Mirrors gesetzt; diese sind **nicht** Teil der
-Abgabe — die mitgelieferte `go.mod`-Logik bleibt unverändert. In eurer Umgebung mit
-normalem `GOPROXY` baut alles ohne Replaces.
-
-## Nächste Schritte (am echten Gerät zu verifizieren)
-- Ob das Gerät beim Read zusätzliche Felder zurückliefert, die wir noch nicht
-  mappen (unkritisch — werden ignoriert).
-- Verhalten von `interval`/`ipv6_interval` als Computed, falls das Gerät Defaults setzt.
-- Dann Phase 2 (AdvHC) auf demselben Helfer-Fundament.
+resource "alteon_appshape_script" "redirect" {
+  index = "as-redirect"
+  state = true
+}
+resource "alteon_appshape_binding" "bind_redirect" {
+  target          = "service"
+  virtual_server  = "vs1"
+  virtual_service = 1
+  priority        = 100
+  script_index    = alteon_appshape_script.redirect.index
+}
 ```

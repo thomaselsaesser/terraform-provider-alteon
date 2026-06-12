@@ -14,8 +14,9 @@ import (
 func resource_alteon_virtual_service() *schema.Resource {
 	return &schema.Resource{
 		CreateContext: resource_alteon_virtual_service_create,
-		ReadContext:   resource_alteon_virtual_service_read,
+		ReadContext:   legacy_virtual_service_read,
 		UpdateContext: resource_alteon_virtual_service_update,
+		Importer:      &schema.ResourceImporter{StateContext: importTwoPartKey("servindex", "index")},
 		DeleteContext: resource_alteon_virtual_service_delete,
 		Schema: map[string]*schema.Schema{
 			"servindex": &schema.Schema{

@@ -14,8 +14,9 @@ import (
 func resource_alteon_server_group() *schema.Resource {
 	return &schema.Resource{
 		CreateContext: resource_alteon_server_group_create,
-		ReadContext:   resource_alteon_server_group_read,
+		ReadContext:   legacy_server_group_read,
 		UpdateContext: resource_alteon_server_group_update,
+		Importer:      &schema.ResourceImporter{StateContext: schema.ImportStatePassthroughContext},
 		DeleteContext: resource_alteon_server_group_delete,
 		Schema: map[string]*schema.Schema{
 			"index": &schema.Schema{

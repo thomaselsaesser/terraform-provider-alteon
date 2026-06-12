@@ -14,8 +14,9 @@ import (
 func resource_alteon_https_health_check() *schema.Resource {
 	return &schema.Resource{
 		CreateContext: resource_alteon_https_health_check_create,
-		ReadContext:   resource_alteon_https_health_check_read,
+		ReadContext:   legacy_https_health_check_read,
 		UpdateContext: resource_alteon_https_health_check_update,
+		Importer:      &schema.ResourceImporter{StateContext: schema.ImportStatePassthroughContext},
 		DeleteContext: resource_alteon_https_health_check_delete,
 		Schema: map[string]*schema.Schema{
 			"index": &schema.Schema{

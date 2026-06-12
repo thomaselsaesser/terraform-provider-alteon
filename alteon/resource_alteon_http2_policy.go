@@ -14,8 +14,9 @@ import (
 func resource_alteon_http2_policy() *schema.Resource {
 	return &schema.Resource{
 		CreateContext: resource_alteon_http2_policy_create,
-		ReadContext:   resource_alteon_http2_policy_read,
+		ReadContext:   legacy_http2_policy_read,
 		UpdateContext: resource_alteon_http2_policy_update,
+		Importer:      &schema.ResourceImporter{StateContext: schema.ImportStatePassthroughContext},
 		DeleteContext: resource_alteon_http2_policy_delete,
 		Schema: map[string]*schema.Schema{
 			"nameidindex": &schema.Schema{

@@ -14,25 +14,9 @@ import (
 //   - Importer: &schema.ResourceImporter{StateContext: ...}
 //   - ReadContext: <hier definierte Read-Funktion>
 
-// --- server_group ------------------------------------------------------------
-func serverGroupImportSpec() legacyImportSpec {
-	r := resource_alteon_server_group()
-	return legacyImportSpec{
-		Tables:        []string{"SlbNewCfgEnhGroupTable"},
-		KeyFields:     map[string]bool{"Index": true},
-		ElementsAttr:  "elements",
-		Overrides:     map[string]string{},
-		ElementFields: elementFieldsFromResource(r, "elements"),
-	}
-}
-
-func legacy_server_group_read(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	key := d.Get("index").(string)
-	if key == "" {
-		key = d.Id()
-	}
-	return legacyImportRead(ctx, d, m, serverGroupImportSpec(), key)
-}
+// --- server_group: ENTFERNT --------------------------------------------------
+// server_group nutzt jetzt das neue deklarative Modell mit eigenem Read + Import
+// (siehe resource_alteon_server_group.go) und braucht den Legacy-Pfad nicht mehr.
 
 // --- real_server (drei Tabellen) ---------------------------------------------
 func realServerImportSpec() legacyImportSpec {

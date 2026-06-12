@@ -2,8 +2,6 @@ package alteon
 
 import (
 	"context"
-	"encoding/json"
-	"strconv"
 	"time"
 
 	radwaregosdk "github.com/Radware/radware_go_sdk"
@@ -11,408 +9,310 @@ import (
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 )
 
+// alteon_server_group -- NEUES deklaratives Modell (sauberer Schnitt, ersetzt das
+// alte elements/Add-Rem-Schema vollstaendig).
+//
+// Eine Gruppe = EINE Ressource. Die Mitglieder werden als vollstaendige Soll-Menge
+// im Feld `servers` beschrieben (wie bei alteon_pip ports/vlans). Gruppeneinstellungen
+// (name, metric, ...) sind flache Top-Level-Felder.
+//
+// Tabellen:
+//   slbNewCfgEnhGroupTable            -- Kopf (Key Index); AddServer/RemoveServer Kommandos
+//   slbNewCfgEnhGroupRealServerTable  -- Mitglieder (Key RealServGroupIndex/ServIndex, Feld State)
+//
+// Read: Ist-Mitglieder aus der Member-Tabelle (clientseitig nach Gruppe gefiltert).
+// Update: Delta gegen `servers` -> AddServer/RemoveServer auf der Kopf-Tabelle.
+//
+// HINWEIS (am Geraet zu verifizieren): Es wird angenommen, dass die Member-Tabelle
+// per Voll-GET gelesen und clientseitig nach dem Gruppen-Index (Spalte
+// RealServGroupIndex) gefiltert werden kann. Falls das Geraet einen gefilterten
+// Pfad /config/<table>/<gruppe> erwartet, ist groupReadMembers entsprechend
+// anzupassen.
+
+const (
+	groupTable       = "slbNewCfgEnhGroupTable"
+	groupMemberTable = "slbNewCfgEnhGroupRealServerTable"
+)
+
+var groupMetric = map[string]int{
+	"roundrobin": 1, "leastconnections": 2, "minmisses": 3, "hash": 4,
+	"response": 5, "bandwidth": 6, "phash": 7, "svcleast": 8, "hrw": 9,
+}
+
+var groupHealthLayer = map[string]int{
+	"icmp": 1, "tcp": 2, "http": 3, "dns": 4, "smtp": 5, "link": 28, "ldap": 31,
+}
+
 func resource_alteon_server_group() *schema.Resource {
 	return &schema.Resource{
 		CreateContext: resource_alteon_server_group_create,
-		ReadContext:   legacy_server_group_read,
+		ReadContext:   resource_alteon_server_group_read,
 		UpdateContext: resource_alteon_server_group_update,
-		Importer:      &schema.ResourceImporter{StateContext: schema.ImportStatePassthroughContext},
 		DeleteContext: resource_alteon_server_group_delete,
+		Importer:      &schema.ResourceImporter{StateContext: schema.ImportStatePassthroughContext},
 		Schema: map[string]*schema.Schema{
-			"index": &schema.Schema{
+			"index": {
 				Type:        schema.TypeString,
-				Optional:    true,
-				Description: "The group alphanumeric index for which the information pertains.",
+				Required:    true,
+				ForceNew:    true,
+				Description: "Group index (table key).",
 			},
-			"last_updated": &schema.Schema{
+			"servers": {
+				Type:        schema.TypeSet,
+				Optional:    true,
+				Elem:        &schema.Schema{Type: schema.TypeString},
+				Description: "Complete set of real server indices that are members of this group (declarative).",
+			},
+			"name": {
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+			"metric": {
 				Type:        schema.TypeString,
 				Optional:    true,
 				Computed:    true,
-				Description: "Resource last updated time.",
+				Description: "Load balancing metric: roundrobin|leastconnections|minmisses|hash|response|bandwidth|phash|svcleast|hrw",
 			},
-			"elements": &schema.Schema{
-				Type:     schema.TypeList,
-				Required: true,
-				Elem: &schema.Resource{
-					Schema: map[string]*schema.Schema{
-						"addserver": &schema.Schema{
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "The real server to be added to the group. When read, 0 is returned.",
-						},
-						"removeserver": &schema.Schema{
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "The real server to be removed from the group. When read, 0 is returned.",
-						},
-						"healthcheckurl": &schema.Schema{
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "The specific content which is examined during health checks. The content depends on the type of health check.",
-						},
-						"name": &schema.Schema{
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "The name of the real server group.",
-						},
-						"healthchecklayer": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "The OSI layer at which servers are health checked. From version 29.0.0.0 the following values are not supported: snmp2-snmp5, script1-script64.",
-						},
-						"metric": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "The metric used to select next server in group.",
-						},
-						"backupserver": &schema.Schema{
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "The backup real server for this group.",
-						},
-						"backupgroup": &schema.Schema{
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "The backup real server group for this group.",
-						},
-						"realthreshold": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "The minimum number of real servers available.If it reaches the minimum limit a SYSLOG ALERT message is send to to the configured syslog servers stating that the real server threshold has been reached for the concerned group.",
-						},
-						"viphealthcheck": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "Enable or disable VIP health checking in DSR mode.",
-						},
-						"idsstate": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "Enable or disable intrusion detection.",
-						},
-						"idsport": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "The intrusion detection port. A value of 1 is invalid.",
-						},
-						"deletestatus": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "By setting the value to delete(2), the entire group is deleted.",
-						},
-						"idsflood": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "Enable or disable intrusion detection group flood.",
-						},
-						"minmisshash": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "24|32 number of sip bits used for minmisses hash in the new_configuration block.",
-						},
-						"phashmask": &schema.Schema{
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "IP address mask used by the persistent hash metric.",
-						},
-						"rmetric": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "The metric used to select next rport in server.",
-						},
-						"healthcheckformula": &schema.Schema{
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "The formula used to state the actual health of a virtual service. It allows user to use the symbols of '(', ')', '|', '&' to construct a formula to state the health of the server group.This string can take the following formats : '(1&2|3..)', '128' or 'none'",
-						},
-						"operatoraccess": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "Enable or disable access to this group for operator.",
-						},
-						"wlm": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "The Workload Manager for this Group.",
-						},
-						"radiusauthenstring": &schema.Schema{
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "The group RADIUS authentication string. The string is used for generating encrypted authentication string while doing RADIUS health check for this group radius servers.",
-						},
-						"secbackupgroup": &schema.Schema{
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "The Secondary backup real server group for this group.",
-						},
-						"slowstart": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "The slow-start time for this group.",
-						},
-						"minthreshold": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "The minimum threshold value for this group.",
-						},
-						"maxthreshold": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "The maximum threshold value for this group.",
-						},
-						"ipver": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "The type of real server group IP address.",
-						},
-						"backup": &schema.Schema{
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "The backup real group or real server for this group.",
-						},
-						"backuptype": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "Backup type of the real server group.",
-						},
-						"healthid": &schema.Schema{
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "The Advanced HC ID.",
-						},
-						"phashprefixlength": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "Prefix length used by the persistent hash metric.",
-						},
-						"type": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "Group type.",
-						},
-						"copy": &schema.Schema{
-							Type:        schema.TypeString,
-							Optional:    true,
-							Description: "The alphanumeric index of the new copy to be created.",
-						},
-						"idschain": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "Enable or disable IDS group participation in inspection chain.",
-						},
-						"sectype": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "The Group security device type.",
-						},
-						"secdeviceflag": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "The Group security device flag",
-						},
-						"maxconex": &schema.Schema{
-							Type:        schema.TypeInt,
-							Optional:    true,
-							Description: "Enable or Disable override maximum connections limit.",
-						},
-					},
-				},
+			"health_check_layer": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "Health check layer: icmp|tcp|http|dns|smtp|link|ldap (or numeric for others).",
+			},
+			"health_id": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				Computed:    true,
+				Description: "Health check ID/name (HealthID).",
+			},
+			"backup_server": {
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+			"backup_group": {
+				Type:     schema.TypeString,
+				Optional: true,
+			},
+			"real_threshold": {
+				Type:     schema.TypeInt,
+				Optional: true,
+				Computed: true,
+			},
+			"slowstart": {
+				Type:     schema.TypeInt,
+				Optional: true,
+				Computed: true,
+			},
+			"ip_ver": {
+				Type:        schema.TypeInt,
+				Optional:    true,
+				Computed:    true,
+				Description: "IP version (1=IPv4, 2=IPv6).",
+			},
+			"last_updated": {
+				Type:     schema.TypeString,
+				Optional: true,
+				Computed: true,
 			},
 		},
 	}
 }
 
-func resource_alteon_server_group_create(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	client := m.(*radwaregosdk.New_Client)
+// groupHeadPayload baut die Kopf-Felder (ohne Member-Kommandos).
+func groupHeadPayload(d *schema.ResourceData) map[string]interface{} {
+	p := map[string]interface{}{}
+	if v, ok := d.GetOk("name"); ok {
+		p["Name"] = v.(string)
+	}
+	if v, ok := d.GetOk("metric"); ok {
+		if n, found := groupMetric[v.(string)]; found {
+			p["Metric"] = n
+		}
+	}
+	if v, ok := d.GetOk("health_check_layer"); ok {
+		if n, found := groupHealthLayer[v.(string)]; found {
+			p["HealthCheckLayer"] = n
+		}
+	}
+	if v, ok := d.GetOk("health_id"); ok {
+		p["HealthID"] = v.(string)
+	}
+	if v, ok := d.GetOk("backup_server"); ok {
+		p["BackupServer"] = v.(string)
+	}
+	if v, ok := d.GetOk("backup_group"); ok {
+		p["BackupGroup"] = v.(string)
+	}
+	if v, ok := d.GetOk("real_threshold"); ok {
+		p["RealThreshold"] = v.(int)
+	}
+	if v, ok := d.GetOk("slowstart"); ok {
+		p["Slowstart"] = v.(int)
+	}
+	if v, ok := d.GetOk("ip_ver"); ok {
+		p["IpVer"] = v.(int)
+	}
+	return p
+}
 
-	// Warning or errors can be collected in a slice type
-	var diags diag.Diagnostics
+// groupReadMembers liest die Ist-Mitglieder einer Gruppe aus der Member-Tabelle.
+func groupReadMembers(client *radwaregosdk.New_Client, groupIndex string) ([]string, diag.Diagnostics) {
+	rows, found, diags := readTable(client, groupMemberTable)
+	if diags.HasError() || !found {
+		return nil, diags
+	}
+	var members []string
+	for _, row := range rows {
+		// Nur Zeilen dieser Gruppe.
+		if asString(row["RealServGroupIndex"]) == groupIndex {
+			members = append(members, asString(row["ServIndex"]))
+		}
+	}
+	return members, diags
+}
 
-	ServerGroupID := d.Get("index").(string)
-	Table := "SlbNewCfgEnhGroupTable"
-	api := "/config/" + Table + "/" + ServerGroupID + "/"
-	items := d.Get("elements").([]interface{})
-	validvals := make(map[string]interface{})
-
-	for _, item := range items {
-		i := item.(map[string]interface{})
-		for key, conf_val := range i {
-			if conf_val != "" && conf_val != 0 {
-				validvals[key] = conf_val
+// groupApplyMemberDelta bringt die Mitgliedschaft auf den Soll-Stand.
+func groupApplyMemberDelta(client *radwaregosdk.New_Client, groupIndex string, want []string) diag.Diagnostics {
+	have, diags := groupReadMembers(client, groupIndex)
+	if diags.HasError() {
+		return diags
+	}
+	wantSet := map[string]bool{}
+	haveSet := map[string]bool{}
+	for _, s := range want {
+		wantSet[s] = true
+	}
+	for _, s := range have {
+		haveSet[s] = true
+	}
+	api := configPath(groupTable, groupIndex)
+	for s := range wantSet {
+		if !haveSet[s] {
+			if dd := writeItem(client, api, map[string]interface{}{"AddServer": s}, false); dd.HasError() {
+				return dd
 			}
 		}
 	}
-
-	brss, err := json.MarshalIndent(validvals, "", "    ")
-	if err != nil {
-		diags = append(diags, diag.Diagnostic{
-			Severity: diag.Error,
-			Summary:  "Error encoding JSON : " + err.Error(),
-			Detail:   err.Error(),
-		})
-		return diags
+	for s := range haveSet {
+		if !wantSet[s] {
+			if dd := writeItem(client, api, map[string]interface{}{"RemoveServer": s}, false); dd.HasError() {
+				return dd
+			}
+		}
 	}
-	APIBytes := []byte(brss)
-	status, message, err := client.CreateItem(api, APIBytes, nil)
-
-	resp_body := map[string]interface{}{}
-	json.Unmarshal([]byte(message), &resp_body)
-
-	detail := "Status Code Received: " + strconv.Itoa(status) + "\nResponse Received: \n" + message
-
-	if err != nil {
-		diags = append(diags, diag.Diagnostic{
-			Severity: diag.Error,
-			Summary:  "REST CreateItem Failed With Error:" + err.Error() + "\n",
-			Detail:   detail + "\nAPI Call Made is:" + api + "\n",
-		})
-		return diags
-	} else if status != 200 {
-		diags = append(diags, diag.Diagnostic{
-			Severity: diag.Error,
-			Summary:  "REST CreateItem Failed as response code received is: " + strconv.Itoa(status),
-			Detail:   detail + "\nAPI Call Made is:\n" + api + "\n",
-		})
-		return diags
-	} else if status == 200 && resp_body["status"].(string) != "ok" {
-		diags = append(diags, diag.Diagnostic{
-			Severity: diag.Error,
-			Summary:  "REST CreateItem Failed as error received in 200 OK Response : " + resp_body["status"].(string),
-			Detail:   detail + "\nAPI Call Made is:\n" + api + "\n",
-		})
-		return diags
-	} else {
-		d.SetId("Resource Create for Server Group")
-	}
-
-	resource_alteon_server_group_read(ctx, d, m)
-
 	return diags
 }
 
+func serverGroupWantServers(d *schema.ResourceData) []string {
+	raw := d.Get("servers").(*schema.Set).List()
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		out = append(out, v.(string))
+	}
+	return out
+}
+
+func resource_alteon_server_group_create(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
+	client := m.(*radwaregosdk.New_Client)
+	idx := d.Get("index").(string)
+	api := configPath(groupTable, idx)
+
+	if diags := writeItem(client, api, groupHeadPayload(d), true); diags.HasError() {
+		return diags
+	}
+	d.SetId(idx)
+
+	if diags := groupApplyMemberDelta(client, idx, serverGroupWantServers(d)); diags.HasError() {
+		return diags
+	}
+	return resource_alteon_server_group_read(ctx, d, m)
+}
+
 func resource_alteon_server_group_read(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
-	// Warning or errors can be collected in a slice type
-	/*var diags diag.Diagnostics
-	diags = append(diags, diag.Diagnostic{
-		Severity: diag.Error,
-		Summary:  "REST ReadItem Failed",
-		Detail:   "Read Item not supported for this resource type",
-	})
-	return diags*/
-	return nil
+	client := m.(*radwaregosdk.New_Client)
+	idx := d.Id()
+	api := configPath(groupTable, idx)
+
+	item, found, diags := readItem(client, api, groupTable)
+	if diags.HasError() {
+		return diags
+	}
+	if !found {
+		d.SetId("")
+		return diags
+	}
+	d.Set("index", idx)
+	if v, ok := item["Name"]; ok {
+		d.Set("name", asString(v))
+	}
+	if v, ok := item["Metric"]; ok {
+		for name, n := range groupMetric {
+			if n == asInt(v) {
+				d.Set("metric", name)
+			}
+		}
+	}
+	if v, ok := item["HealthCheckLayer"]; ok {
+		matched := false
+		for name, n := range groupHealthLayer {
+			if n == asInt(v) {
+				d.Set("health_check_layer", name)
+				matched = true
+			}
+		}
+		_ = matched
+	}
+	if v, ok := item["HealthID"]; ok {
+		d.Set("health_id", asString(v))
+	}
+	if v, ok := item["BackupServer"]; ok {
+		d.Set("backup_server", asString(v))
+	}
+	if v, ok := item["BackupGroup"]; ok {
+		d.Set("backup_group", asString(v))
+	}
+	if v, ok := item["RealThreshold"]; ok {
+		d.Set("real_threshold", asInt(v))
+	}
+	if v, ok := item["Slowstart"]; ok {
+		d.Set("slowstart", asInt(v))
+	}
+	if v, ok := item["IpVer"]; ok {
+		d.Set("ip_ver", asInt(v))
+	}
+
+	// Mitglieder aus der Member-Tabelle.
+	members, mdiags := groupReadMembers(client, idx)
+	if mdiags.HasError() {
+		return mdiags
+	}
+	d.Set("servers", members)
+	return diags
 }
 
 func resource_alteon_server_group_update(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := m.(*radwaregosdk.New_Client)
+	idx := d.Id()
+	api := configPath(groupTable, idx)
 
-	// Warning or errors can be collected in a slice type
-	var diags diag.Diagnostics
-
-	ServerGroupID := d.Get("index").(string)
-	Table := "SlbNewCfgEnhGroupTable"
-	api := "/config/" + Table + "/" + ServerGroupID + "/"
-
-	items := d.Get("elements").([]interface{})
-	validvals := make(map[string]interface{})
-
-	for _, item := range items {
-		i := item.(map[string]interface{})
-		for key, conf_val := range i {
-			if conf_val != "" && conf_val != 0 {
-				validvals[key] = conf_val
-			}
+	if diags := writeItem(client, api, groupHeadPayload(d), false); diags.HasError() {
+		return diags
+	}
+	if d.HasChange("servers") {
+		if diags := groupApplyMemberDelta(client, idx, serverGroupWantServers(d)); diags.HasError() {
+			return diags
 		}
 	}
-
-	brss, err := json.MarshalIndent(validvals, "", "    ")
-	if err != nil {
-		diags = append(diags, diag.Diagnostic{
-			Severity: diag.Error,
-			Summary:  "Error encoding JSON : " + err.Error(),
-			Detail:   err.Error(),
-		})
-		return diags
-	}
-	APIBytes := []byte(brss)
-	status, message, err := client.UpdateItem(api, APIBytes, nil)
-
-	resp_body := map[string]interface{}{}
-	json.Unmarshal([]byte(message), &resp_body)
-
-	detail := "Status Code Received: " + strconv.Itoa(status) + "\nResponse Received: \n" + message
-
-	if err != nil {
-		diags = append(diags, diag.Diagnostic{
-			Severity: diag.Error,
-			Summary:  "REST UpdateItem Failed With Error:" + err.Error() + "\n",
-			Detail:   detail + "\nAPI Call Made is:" + api + "\n",
-		})
-		return diags
-	} else if status != 200 {
-		diags = append(diags, diag.Diagnostic{
-			Severity: diag.Error,
-			Summary:  "REST UpdateItem Failed as response code received is: " + strconv.Itoa(status),
-			Detail:   detail + "\nAPI Call Made is:\n" + api + "\n",
-		})
-		return diags
-	} else if status == 200 && resp_body["status"].(string) != "ok" {
-		diags = append(diags, diag.Diagnostic{
-			Severity: diag.Error,
-			Summary:  "REST UpdateItem Failed as error received in 200 OK Response : " + resp_body["status"].(string),
-			Detail:   detail + "\nAPI Call Made is:\n" + api + "\n",
-		})
-		return diags
-	} else {
-		d.Set("last_updated", time.Now().Format(time.RFC3339))
-	}
-
-	resource_alteon_server_group_read(ctx, d, m)
-
-	return diags
+	d.Set("last_updated", time.Now().Format(time.RFC3339))
+	return resource_alteon_server_group_read(ctx, d, m)
 }
 
 func resource_alteon_server_group_delete(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	client := m.(*radwaregosdk.New_Client)
-
-	// Warning or errors can be collected in a slice type
-	var diags diag.Diagnostics
-
-	ServerGroupID := d.Get("index").(string)
-	Table := "SlbNewCfgEnhGroupTable"
-	api := "/config/" + Table + "/" + ServerGroupID + "/"
-	status, message, err := client.DeleteItem(api, nil, nil)
-
-	resp_body := map[string]interface{}{}
-	json.Unmarshal([]byte(message), &resp_body)
-
-	detail := "Status Code Received: " + strconv.Itoa(status) + "\nResponse Received: \n" + message
-
-	if err != nil {
-		diags = append(diags, diag.Diagnostic{
-			Severity: diag.Error,
-			Summary:  "REST DeleteItem Failed With Error:" + err.Error() + "\n",
-			Detail:   detail + "\nAPI Call Made is:" + api + "\n",
-		})
+	api := configPath(groupTable, d.Id())
+	if diags := deleteItem(client, api); diags.HasError() {
 		return diags
-	} else if status != 200 {
-		diags = append(diags, diag.Diagnostic{
-			Severity: diag.Error,
-			Summary:  "REST DeleteItem Failed as response code received is: " + strconv.Itoa(status),
-			Detail:   detail + "\nAPI Call Made is:\n" + api + "\n",
-		})
-		return diags
-	} else if status == 200 && resp_body["status"].(string) != "ok" {
-		diags = append(diags, diag.Diagnostic{
-			Severity: diag.Error,
-			Summary:  "REST DeleteItem Failed as error received in 200 OK Response : " + resp_body["status"].(string),
-			Detail:   detail + "\nAPI Call Made is:\n" + api + "\n",
-		})
-		return diags
-	} else {
-		d.SetId("")
 	}
-
-	//resourceServerGroupRead(ctx, d, m)
-
-	return diags
+	d.SetId("")
+	return nil
 }

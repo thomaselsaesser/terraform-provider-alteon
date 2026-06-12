@@ -297,3 +297,45 @@ func interfaceListToInts(raw []interface{}) []int {
 func intToStr(n int) string {
 	return strconv.Itoa(n)
 }
+
+// readTable liest eine GANZE Tabelle (ohne Key) und gibt alle Zeilen als Slice
+// von Maps zurueck. Genutzt fuer Tabellen, die clientseitig nach einer Spalte
+// gefiltert werden muessen (z.B. Gruppen-Mitglieder pro Gruppe).
+// found=false bei 404/leer.
+func readTable(client *radwaregosdk.New_Client, table string) ([]map[string]interface{}, bool, diag.Diagnostics) {
+	var diags diag.Diagnostics
+	api := "/config/" + table
+	status, message, err := client.GetItem(api, nil, nil)
+	if err != nil {
+		diags = append(diags, diag.Diagnostic{
+			Severity: diag.Error,
+			Summary:  "REST GetItem (table) failed: " + err.Error(),
+			Detail:   "API: " + api,
+		})
+		return nil, false, diags
+	}
+	if status == 404 {
+		return nil, false, diags
+	}
+	if status != 200 {
+		diags = append(diags, diag.Diagnostic{
+			Severity: diag.Error,
+			Summary:  "REST GetItem (table) failed, code: " + strconv.Itoa(status),
+			Detail:   "API: " + api + "\n" + message,
+		})
+		return nil, false, diags
+	}
+	parsed := map[string]interface{}{}
+	json.Unmarshal([]byte(message), &parsed)
+	rows, ok := parsed[table].([]interface{})
+	if !ok || len(rows) == 0 {
+		return nil, false, diags
+	}
+	out := make([]map[string]interface{}, 0, len(rows))
+	for _, r := range rows {
+		if mm, ok := r.(map[string]interface{}); ok {
+			out = append(out, mm)
+		}
+	}
+	return out, true, diags
+}

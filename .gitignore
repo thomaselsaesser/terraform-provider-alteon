@@ -1,0 +1,21 @@
+# Gebaute Provider-Binary (gehoert NICHT in den Quellbaum)
+/terraform-provider-alteon
+/terraform-provider-alteon.exe
+
+# Transfer-Verzeichnis (wird per make dist erzeugt)
+/dist/
+
+# Terraform-Laufzeit
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+crash.log
+
+# Editor / OS
+*.swp
+.DS_Store
+
+# WICHTIG: vendor/ wird NICHT ignoriert -- es MUSS ins Kunden-GitLab,
+# damit dort ohne Internet gebaut werden kann.
+!vendor/

@@ -47,6 +47,34 @@ func Provider() *schema.Provider {
 			"alteon_ssl_policy":         resource_alteon_ssl_policy(),
 			"alteon_http2_policy":       resource_alteon_http2_policy(),
 			"alteon_https_health_check": resource_alteon_https_health_check(),
+			"alteon_vrrp":               resource_alteon_vrrp(),
+			"alteon_vrrp_group":         resource_alteon_vrrp_group(),
+			// Phase 2: Advanced Health Checks
+			"alteon_advhc_tcp":      resource_alteon_advhc_tcp(),
+			"alteon_advhc_icmp":     resource_alteon_advhc_icmp(),
+			"alteon_advhc_udp":      resource_alteon_advhc_udp(),
+			"alteon_advhc_dns":      resource_alteon_advhc_dns(),
+			"alteon_advhc_http":     resource_alteon_advhc_http(),
+			"alteon_advhc_smtp":     resource_alteon_advhc_smtp(),
+			"alteon_advhc_sslhello": resource_alteon_advhc_sslhello(),
+			"alteon_advhc_ldap":     resource_alteon_advhc_ldap(),
+			"alteon_advhc_radius":   resource_alteon_advhc_radius(),
+			"alteon_advhc_arp":      resource_alteon_advhc_arp(),
+			"alteon_advhc_link":     resource_alteon_advhc_link(),
+			"alteon_advhc_script":   resource_alteon_advhc_script(),
+			// Phase 3: Proxy IP
+			"alteon_pip":      resource_alteon_pip(),
+			"alteon_peer_pip": resource_alteon_peer_pip(),
+			// Phase 4: Traffic Match Criteria
+			"alteon_data_class":    resource_alteon_data_class(),
+			"alteon_content_class": resource_alteon_content_class(),
+			// Phase 5: Filters
+			"alteon_filter":                  resource_alteon_filter(),
+			"alteon_filter_port":             resource_alteon_filter_port(),
+			"alteon_filter_redirect_mapping": resource_alteon_filter_redirect_mapping(),
+			// Phase 6: AppShape
+			"alteon_appshape_script":  resource_alteon_appshape_script(),
+			"alteon_appshape_binding": resource_alteon_appshape_binding(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
 			//"real_server": dataSourceRealServer(),

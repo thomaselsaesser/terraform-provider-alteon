@@ -5,7 +5,7 @@ BINARY      := terraform-provider-alteon
 # Version fuer den Terraform-Plugin-Pfad. Bei jeder Aenderung hochzaehlen.
 VERSION     := 0.1.0
 # Terraform-Plugin-Namespace (lokaler Provider). Passt zu required_providers unten.
-NAMESPACE   := animate.de/slb/alteon
+NAMESPACE   := slb/alteon
 
 # Statisch + reproduzierbar: CGO aus, Pfade getrimmt, Symbole gestrippt.
 GOFLAGS     := -trimpath
@@ -39,15 +39,15 @@ fmt:
 vet:
 	go vet -mod=vendor ./...
 
-## dist: Binary fuer den Transfer zu lbmgmt vorbereiten (mit Pruefsumme)
+## dist: Binary fuer den Transfer zu host vorbereiten (mit Pruefsumme)
 dist: build
 	@mkdir -p dist
 	@cp $(BINARY) dist/
 	@cd dist && sha256sum $(BINARY) > $(BINARY).sha256
-	@echo "dist/$(BINARY) + .sha256 bereit zum Transfer auf lbmgmt."
+	@echo "dist/$(BINARY) + .sha256 bereit zum Transfer auf host."
 
 ## install-local: Binary auf DIESEM Rechner in den Terraform-Plugin-Pfad legen
-## (zum Testen auf dem Build-Rechner; auf lbmgmt macht das die Anleitung manuell)
+## (zum Testen auf dem Build-Rechner; auf host macht das die Anleitung manuell)
 install-local: build
 	@mkdir -p ~/.terraform.d/plugins/$(NAMESPACE)/$(VERSION)/linux_amd64
 	@cp $(BINARY) ~/.terraform.d/plugins/$(NAMESPACE)/$(VERSION)/linux_amd64/

@@ -65,13 +65,13 @@ Siehe `BUILD_UND_TRANSFER.md` (3-Rechner-Workflow). Kurz:
 ```bash
 make vendor    # einmalig mit Internet
 make build     # statische linux/amd64-Binary
-make dist      # Binary + sha256 fuer lbmgmt
+make dist      # Binary + sha256 
 ```
 
 ## Mitgelieferte Test-Binary
 
 `terraform-provider-alteon.linux-amd64` (+ .sha256) ist die in dieser Sitzung
-gebaute statische Binary. Du kannst sie direkt auf lbmgmt testen — ich empfehle aber,
+gebaute statische Binary. Du kannst sie direkt auf host testen — ich empfehle aber,
 nach dem `make vendor` auf deinem Build-Rechner neu zu bauen, damit Binary und
 gepushter Sourcecode garantiert aus demselben Stand stammen.
 

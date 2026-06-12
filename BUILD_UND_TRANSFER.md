@@ -6,7 +6,7 @@ Drei Rechner, drei Rollen:
 |-----------|----------|----------------------------------------------|
 | Build-PC  | ja       | Go installiert, baut Binary + erzeugt vendor/ |
 | Kunden-GitLab | (egal) | bekommt **Sourcecode** inkl. `vendor/`      |
-| lbmgmt    | nein     | Terraform-Rechner, bekommt **nur die Binary** |
+| host    | nein     | Terraform-Rechner, bekommt **nur die Binary** |
 
 Kernidee: Auf dem Build-PC wird einmal mit Internet alles besorgt
 (`go mod vendor`). Danach ist das Repo offline-baubar, und sowohl Binary als auch
@@ -90,14 +90,14 @@ braeuchte der Build dort einen Go-Modul-Proxy.
 
 ---
 
-## TEIL D — Binary auf lbmgmt (Terraform-Rechner, kein Internet)
+## TEIL D — Binary auf host (Terraform-Rechner, kein Internet)
 
 Terraform findet lokale Provider ueber einen festen Pfad-Aufbau:
 `<plugin-dir>/<namespace>/<name>/<version>/<os>_<arch>/<binary>`
 
 ### D1. Binary + Prüfsumme transferieren
-`dist/terraform-provider-alteon` und `.sha256` per scp/USB auf lbmgmt bringen.
-Auf lbmgmt die Prüfsumme verifizieren:
+`dist/terraform-provider-alteon` und `.sha256` per scp/USB auf host bringen.
+Auf host die Prüfsumme verifizieren:
 ```bash
 sha256sum -c terraform-provider-alteon.sha256
 ```
@@ -105,7 +105,7 @@ sha256sum -c terraform-provider-alteon.sha256
 ### D2. In den Terraform-Plugin-Pfad legen
 ```bash
 VER=0.1.0
-NS=animate.de/slb/alteon
+NS=slb/alteon
 DEST=~/.terraform.d/plugins/$NS/$VER/linux_amd64
 mkdir -p "$DEST"
 cp terraform-provider-alteon "$DEST/terraform-provider-alteon_v$VER"
@@ -114,13 +114,13 @@ chmod +x "$DEST/terraform-provider-alteon_v$VER"
 (Der Versions-Suffix `_v$VER` im Dateinamen ist die von Terraform erwartete
 Namenskonvention fuer den Filesystem-Mirror.)
 
-### D3. Terraform-Konfiguration auf lbmgmt
+### D3. Terraform-Konfiguration auf host
 In eurer `.tf`-Konfiguration den Provider so referenzieren:
 ```hcl
 terraform {
   required_providers {
     alteon = {
-      source  = "animate.de/slb/alteon"
+      source  = "slb/alteon"
       version = "0.1.0"
     }
   }
@@ -142,7 +142,7 @@ terraform plan
 
 > Falls Terraform meckert, es koenne den Provider nicht "verifizieren":
 > `terraform init` mit der lokalen Quelle braucht keinen Registry-Zugriff, aber
-> achte darauf, dass `source` exakt der Pfad-Namespace ist (animate.de/slb/alteon)
+> achte darauf, dass `source` exakt der Pfad-Namespace ist (slb/alteon)
 > und die Verzeichnisstruktur darunter stimmt.
 
 ---
@@ -154,7 +154,7 @@ Bei Code-Aenderungen (z.B. Phase 2 AdvHC):
 2. Wenn sich Dependencies geaenderten haben: `make vendor` (Internet).
    Sonst entfaellt das — `vendor/` bleibt gueltig.
 3. `make dist` → neue Binary.
-4. Code ins GitLab pushen, Binary auf lbmgmt in den neuen `0.2.0`-Pfad legen.
+4. Code ins GitLab pushen, Binary auf host in den neuen `0.2.0`-Pfad legen.
 5. `version` in der Terraform-Config anpassen, `terraform init -upgrade`.
 
 ---

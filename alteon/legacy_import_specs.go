@@ -2,6 +2,7 @@ package alteon
 
 import (
 	"context"
+	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -159,9 +160,10 @@ func virtualServiceImportSpec() legacyImportSpec {
 
 func legacy_virtual_service_read(ctx context.Context, d *schema.ResourceData, m interface{}) diag.Diagnostics {
 	serv := d.Get("servindex").(string)
-	idx := d.Get("index").(string)
+	// index ist im Schema ein Integer (HCL: index=1), daher NICHT als string casten.
+	idx := strconv.Itoa(d.Get("index").(int))
 	keyPath := serv + "/" + idx
-	if serv == "" || idx == "" {
+	if serv == "" || d.Get("index").(int) == 0 {
 		keyPath = d.Id() // bei Import: Id ist "servindex/index"
 	}
 	return legacyImportRead(ctx, d, m, virtualServiceImportSpec(), keyPath)

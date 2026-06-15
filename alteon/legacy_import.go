@@ -2,6 +2,7 @@ package alteon
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	radwaregosdk "github.com/Radware/radware_go_sdk"
@@ -102,14 +103,19 @@ func elementFieldsFromResource(r *schema.Resource, elementsAttr string) map[stri
 	return out
 }
 
-// importSplitKey ist ein StateContext-Importer fuer zweiteilige Keys ("a/b"),
-// der die beiden Teile auf die angegebenen Schemafelder verteilt.
+// importTwoPartKey ist ein StateContext-Importer fuer zweiteilige Keys ("a/b"),
+// der die beiden Teile auf die angegebenen Schemafelder verteilt. field2 ist im
+// virtual_service-Schema ein Integer, daher wird der zweite Teil als int gesetzt.
 func importTwoPartKey(field1, field2 string) schema.StateContextFunc {
 	return func(ctx context.Context, d *schema.ResourceData, m interface{}) ([]*schema.ResourceData, error) {
 		parts := strings.SplitN(d.Id(), "/", 2)
 		if len(parts) == 2 {
 			d.Set(field1, parts[0])
-			d.Set(field2, parts[1])
+			if n, err := strconv.Atoi(parts[1]); err == nil {
+				d.Set(field2, n)
+			} else {
+				d.Set(field2, parts[1])
+			}
 		}
 		return []*schema.ResourceData{d}, nil
 	}

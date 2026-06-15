@@ -119,39 +119,29 @@ func resource_alteon_server_group() *schema.Resource {
 }
 
 // groupHeadPayload baut die Kopf-Felder (ohne Member-Kommandos).
+// WICHTIG: Alteon ignoriert Partial-PUTs stillschweigend. Daher senden wir IMMER
+// alle Felder, auch ungeaenderte. Das entspricht dem Verhalten des Original-Providers.
 func groupHeadPayload(d *schema.ResourceData) map[string]interface{} {
 	p := map[string]interface{}{}
-	if v, ok := d.GetOk("name"); ok {
-		p["Name"] = v.(string)
-	}
-	if v, ok := d.GetOk("metric"); ok {
-		if n, found := groupMetric[v.(string)]; found {
+	// Name: leerer String setzt ihn zurueck (CLI: name none).
+	p["Name"] = d.Get("name").(string)
+
+	if v := d.Get("metric").(string); v != "" {
+		if n, found := groupMetric[v]; found {
 			p["Metric"] = n
 		}
 	}
-	if v, ok := d.GetOk("health_check_layer"); ok {
-		if n, found := groupHealthLayer[v.(string)]; found {
+	if v := d.Get("health_check_layer").(string); v != "" {
+		if n, found := groupHealthLayer[v]; found {
 			p["HealthCheckLayer"] = n
 		}
 	}
-	if v, ok := d.GetOk("health_id"); ok {
-		p["HealthID"] = v.(string)
-	}
-	if v, ok := d.GetOk("backup_server"); ok {
-		p["BackupServer"] = v.(string)
-	}
-	if v, ok := d.GetOk("backup_group"); ok {
-		p["BackupGroup"] = v.(string)
-	}
-	if v, ok := d.GetOk("real_threshold"); ok {
-		p["RealThreshold"] = v.(int)
-	}
-	if v, ok := d.GetOk("slowstart"); ok {
-		p["Slowstart"] = v.(int)
-	}
-	if v, ok := d.GetOk("ip_ver"); ok {
-		p["IpVer"] = v.(int)
-	}
+	p["HealthID"] = d.Get("health_id").(string)
+	p["BackupServer"] = d.Get("backup_server").(string)
+	p["BackupGroup"] = d.Get("backup_group").(string)
+	p["RealThreshold"] = d.Get("real_threshold").(int)
+	p["Slowstart"] = d.Get("slowstart").(int)
+	p["IpVer"] = d.Get("ip_ver").(int)
 	return p
 }
 

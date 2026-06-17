@@ -280,6 +280,33 @@ func flatRead(spec flatSpec) schema.ReadContextFunc {
 		}
 		if !anyFound {
 			d.SetId("")
+		} else {
+			// Key-Felder in den State schreiben (nach Import noetig, sonst
+			// ForceNew weil index von "" auf den echten Wert wechselt).
+			switch spec.KeyType {
+			case ftInt:
+				if n, err := strconv.Atoi(keyPath); err == nil {
+					d.Set(spec.KeySchema, n)
+				}
+			default:
+				if spec.Key2Schema != "" {
+					// Zweiteiliger Key: aufsplitten.
+					parts := splitSlash(keyPath)
+					if len(parts) == 2 {
+						d.Set(spec.KeySchema, parts[0])
+						switch spec.Key2Type {
+						case ftInt:
+							if n, err := strconv.Atoi(parts[1]); err == nil {
+								d.Set(spec.Key2Schema, n)
+							}
+						default:
+							d.Set(spec.Key2Schema, parts[1])
+						}
+					}
+				} else {
+					d.Set(spec.KeySchema, keyPath)
+				}
+			}
 		}
 		return nil
 	}

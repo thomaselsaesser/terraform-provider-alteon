@@ -17,6 +17,7 @@ import (
 // eigene IP, sondern wirkt geraeteweit fuer das gesamte HA-Paar.
 
 const vrrpVirtRtrGrpTable = "vrrpNewCfgVirtRtrGrpTable"
+const vrGrpMemberTable = "vrrpNewCfgVirtRtrVrGrpTable"
 
 func resource_alteon_vrrp_group() *schema.Resource {
 	return &schema.Resource{
@@ -36,6 +37,12 @@ func resource_alteon_vrrp_group() *schema.Resource {
 				Type:        schema.TypeInt,
 				Required:    true,
 				Description: "The Virtual Router ID (ID) for the group. May differ from index.",
+			},
+			"virtual_routers": {
+				Type:        schema.TypeSet,
+				Optional:    true,
+				Elem:        &schema.Schema{Type: schema.TypeInt},
+				Description: "Complete set of Virtual Router indices that are members of this group (declarative). Uses Bmap/Add/Rem on vrrpNewCfgVirtRtrVrGrpTable.",
 			},
 			"if_index": {
 				Type:        schema.TypeInt,
@@ -122,6 +129,40 @@ var vrrpGroupBoolFields = map[string]string{
 	"track_isl_port_include": "TckIslPort",
 }
 
+// vrGrpReadMembers liest die Ist-Mitglieder aus dem Bmap der Member-Tabelle.
+func vrGrpReadMembers(client *radwaregosdk.New_Client, groupKey string) ([]int, diag.Diagnostics) {
+	api := configPath(vrGrpMemberTable, groupKey)
+	item, found, diags := readItem(client, api, vrGrpMemberTable)
+	if diags.HasError() || !found {
+		return nil, diags
+	}
+	if v, ok := item["Bmap"]; ok {
+		return decodeHexBitmap(asString(v)), nil
+	}
+	return nil, diags
+}
+
+// vrGrpApplyMemberDelta bringt die VR-Mitgliedschaft auf den Soll-Stand.
+func vrGrpApplyMemberDelta(client *radwaregosdk.New_Client, groupKey string, want []int) diag.Diagnostics {
+	have, diags := vrGrpReadMembers(client, groupKey)
+	if diags.HasError() {
+		return diags
+	}
+	add, rem := setDelta(want, have)
+	api := configPath(vrGrpMemberTable, groupKey)
+	for _, v := range add {
+		if dd := writeItem(client, api, map[string]interface{}{"Add": v}, false); dd.HasError() {
+			return dd
+		}
+	}
+	for _, v := range rem {
+		if dd := writeItem(client, api, map[string]interface{}{"Rem": v}, false); dd.HasError() {
+			return dd
+		}
+	}
+	return nil
+}
+
 func vrrpGroupPayload(d *schema.ResourceData) map[string]interface{} {
 	p := map[string]interface{}{
 		"Indx": d.Get("index").(int),
@@ -166,6 +207,15 @@ func resource_alteon_vrrp_group_create(ctx context.Context, d *schema.ResourceDa
 		return diags
 	}
 	d.SetId(key)
+
+	// VR-Mitglieder hinzufuegen.
+	if v, ok := d.GetOk("virtual_routers"); ok {
+		want := interfaceListToInts(v.(*schema.Set).List())
+		if diags := vrGrpApplyMemberDelta(client, key, want); diags.HasError() {
+			return diags
+		}
+	}
+
 	return resource_alteon_vrrp_group_read(ctx, d, m)
 }
 
@@ -215,6 +265,13 @@ func resource_alteon_vrrp_group_read(ctx context.Context, d *schema.ResourceData
 			d.Set(schemaKey, enableToBool(v))
 		}
 	}
+	// VR-Mitglieder aus der Member-Tabelle lesen.
+	members, mdiags := vrGrpReadMembers(client, d.Id())
+	if mdiags.HasError() {
+		return mdiags
+	}
+	d.Set("virtual_routers", members)
+
 	return diags
 }
 
@@ -224,6 +281,13 @@ func resource_alteon_vrrp_group_update(ctx context.Context, d *schema.ResourceDa
 
 	if diags := writeItem(client, api, vrrpGroupPayload(d), false); diags.HasError() {
 		return diags
+	}
+	// VR-Mitglieder aktualisieren.
+	if d.HasChange("virtual_routers") {
+		want := interfaceListToInts(d.Get("virtual_routers").(*schema.Set).List())
+		if diags := vrGrpApplyMemberDelta(client, d.Id(), want); diags.HasError() {
+			return diags
+		}
 	}
 	d.Set("last_updated", time.Now().Format(time.RFC3339))
 	return resource_alteon_vrrp_group_read(ctx, d, m)

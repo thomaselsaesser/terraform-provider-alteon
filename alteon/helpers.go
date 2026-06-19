@@ -3,6 +3,7 @@ package alteon
 import (
 	"encoding/json"
 	"strconv"
+	"strings"
 
 	radwaregosdk "github.com/Radware/radware_go_sdk"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
@@ -296,6 +297,34 @@ func interfaceListToInts(raw []interface{}) []int {
 // intToStr ist eine Kurzform fuer strconv.Itoa, lokal genutzt fuer Eintrags-Keys.
 func intToStr(n int) string {
 	return strconv.Itoa(n)
+}
+
+// writeItemLenient fuehrt ein PUT aus, ignoriert aber 406 "Nothing to set"
+// (tritt bei Multi-Table-Updates auf, wenn das Feld nicht zur Tabelle gehoert).
+func writeItemLenient(client *radwaregosdk.New_Client, api string, payload map[string]interface{}) diag.Diagnostics {
+	var diags diag.Diagnostics
+	body, _ := json.MarshalIndent(payload, "", "    ")
+	status, message, err := client.UpdateItem(api, body, nil)
+	if err != nil {
+		diags = append(diags, diag.Diagnostic{
+			Severity: diag.Error,
+			Summary:  "REST UpdateItem failed: " + err.Error(),
+			Detail:   "API: " + api,
+		})
+		return diags
+	}
+	// 406 "Nothing to set" ist bei Multi-Table-Updates harmlos.
+	if status == 406 && strings.Contains(message, "Nothing to set") {
+		return diags
+	}
+	if status != 200 {
+		diags = append(diags, diag.Diagnostic{
+			Severity: diag.Error,
+			Summary:  "REST UpdateItem failed, response code: " + strconv.Itoa(status),
+			Detail:   "API: " + api + "\n" + message,
+		})
+	}
+	return diags
 }
 
 // readTable liest eine GANZE Tabelle (ohne Key) und gibt alle Zeilen als Slice

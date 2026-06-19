@@ -319,11 +319,14 @@ func flatUpdate(spec flatSpec) schema.UpdateContextFunc {
 		payload := flatUpdatePayload(spec, d)
 
 		if len(payload) > 0 {
-			// Sende an ALLE Tabellen — Alteon ignoriert Felder, die nicht zur
-			// jeweiligen Tabelle gehoeren.
+			// Bei Multi-Table-Ressourcen: Payload an alle Tabellen senden.
+			// Tabellen, die keines der Felder kennen, antworten mit 406
+			// "Nothing to set" -- das ist kein Fehler, sondern heisst nur
+			// "dieses Feld gehoert nicht zu mir". Wir ignorieren es.
 			for _, table := range spec.Tables {
 				api := configPath(table, keyPath)
-				if diags := writeItem(client, api, payload, false); diags.HasError() {
+				diags := writeItemLenient(client, api, payload)
+				if diags.HasError() {
 					return diags
 				}
 			}

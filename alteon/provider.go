@@ -45,6 +45,8 @@ func Provider() *schema.Provider {
 			"alteon_virtual_server":     resource_alteon_virtual_server(),
 			"alteon_virtual_service":    resource_alteon_virtual_service(),
 			"alteon_ssl_policy":         resource_alteon_ssl_policy(),
+			"alteon_ssl_cert":           resource_alteon_ssl_cert(),
+			"alteon_ssl_cert_group":     resource_alteon_ssl_cert_group(),
 			"alteon_http2_policy":       resource_alteon_http2_policy(),
 			"alteon_https_health_check": resource_alteon_https_health_check(),
 			"alteon_vrrp":               resource_alteon_vrrp(),

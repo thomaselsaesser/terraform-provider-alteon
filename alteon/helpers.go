@@ -208,7 +208,7 @@ func asString(v interface{}) string {
 // die 1-basierte MSB-first-Nummerierung ist die uebliche Alteon-Konvention.
 
 // decodeHexBitmap wandelt "00:20:..." in die sortierte Liste gesetzter
-// 1-basierter Element-Nummern.
+// Element-Nummern. 0-basiert (am Geraet verifiziert: VLAN 1898 statt 1899).
 func decodeHexBitmap(s string) []int {
 	var result []int
 	if s == "" {
@@ -218,9 +218,8 @@ func decodeHexBitmap(s string) []int {
 	for byteIdx, hb := range bytes {
 		val := hexByte(hb)
 		for bit := 0; bit < 8; bit++ {
-			// MSB (bit 7) = niedrigste Elementnummer im Byte.
 			if val&(1<<(7-bit)) != 0 {
-				elem := byteIdx*8 + bit + 1 // 1-basiert
+				elem := byteIdx*8 + bit // 0-basiert
 				result = append(result, elem)
 			}
 		}

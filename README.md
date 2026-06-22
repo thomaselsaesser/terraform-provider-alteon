@@ -1,11 +1,11 @@
-# terraform-provider-alteon — animate-Erweiterung
+# terraform-provider-alteon — Erweiterung
 
 Terraform-Provider für Radware Alteon Loadbalancer (REST-API, FW 34.0.9+).
 Erweitert den von Radware geclonten Provider um vollständiges CRUD über die
 REST-Tabellen mit echtem Read (Drift-Detection), flachem Schema und Import-Support
 für alle Ressourcen.
 
-**46 Ressourcen** (30 managed + 9 Data Sources + 7 Operations).
+**48 Ressourcen** (32 managed + 9 Data Sources + 7 Operations).
 
 ---
 
@@ -82,9 +82,11 @@ Zugangsdaten per Umgebungsvariable: `ALTEON_IP`, `ALTEON_USERNAME`, `ALTEON_PASS
 | Ressource | Key | Tabelle(n) |
 |-----------|-----|------------|
 | `alteon_real_server` | `index` (string) | EnhRealServerTable + SecondPart + ThirdPart |
+| `alteon_real_server_layer7` | `real_server` (string) | Layer7-URL-Zuordnung (ExcludeStr + UrlBmap) |
 | `alteon_server_group` | `index` (string) | EnhGroupTable + Member-Tabelle |
 | `alteon_virtual_server` | `index` (string) | EnhVirtServerTable |
 | `alteon_virtual_service` | `servindex` + `index` (string/int) | EnhVirtServicesTable (7 Teile) |
+| `alteon_url_lb_path` | `index` (int) | UrlLbPathTable (Layer7-URL-Pfad-Definition) |
 
 ### SSL / TLS
 
@@ -124,11 +126,11 @@ Gemeinsame Felder aller HC-Typen: `name`, `dport`, `ip_version`, `host_name`,
 | `alteon_vrrp` | `index` (int) | Virtual Router |
 | `alteon_vrrp_group` | `index` (int) | VR Group mit deklarativer `virtual_routers`-Liste |
 
-### Filter
+### Filter (alle 120+ Felder: L3/L4, SSL, ADV, ACL)
 
 | Ressource | Key | Beschreibung |
 |-----------|-----|--------------|
-| `alteon_filter` | `index` (int) | Filter (alle 120+ Felder: L3/L4, SSL, ADV, ACL) |
+| `alteon_filter` | `index` (int) | Filter-Definition |
 | `alteon_filter_port` | `port` (int) | Filter-Zuordnung zu Port (deklarative `filters`-Liste) |
 | `alteon_filter_redirect_mapping` | `filter` + `from_str` | HTTP-Redirect-Mapping |
 
@@ -161,6 +163,18 @@ Gemeinsame Felder aller HC-Typen: `name`, `dport`, `ip_version`, `host_name`,
 | `alteon_save` | Running Config persistent speichern |
 | `alteon_revert` | Pending Config verwerfen |
 | `alteon_cli_command` | Einzelnes CLI-Kommando absetzen |
+
+### CLI-Command (Escape-Hatch für alles ohne eigene Ressource)
+
+```hcl
+resource "alteon_cli_command" "real43_layer7" {
+  agalteonclicommand = "/c/slb/real 43/layer7/exclude e/addlb 2"
+}
+```
+
+Kein Read/Import/Drift-Detection — reines Einweg-Kommando. Für Layer7-URL-
+Zuordnungen gibt es jetzt `alteon_real_server_layer7` + `alteon_url_lb_path`
+als deklarative Alternative.
 
 ---
 
@@ -205,10 +219,28 @@ resource "alteon_virtual_service" "svc1" {
 }
 ```
 
+### Layer7-URL-Zuordnung (ersetzt cli_command)
+
+```hcl
+resource "alteon_url_lb_path" "health" {
+  index       = 2
+  string_val  = "/api/health"
+  application = 1   # 1=http
+}
+
+resource "alteon_real_server_layer7" "rs43_l7" {
+  real_server = "43"
+  exclude_str = 1      # 1=enabled
+  urls        = [2]    # URL-Pfad-Indizes (deklarativ)
+}
+```
+
+CLI-Äquivalent: `/c/slb/real 43/layer7/exclude e/addlb 2`
+
 ### SSL Policy
 
 ```hcl
-resource "alteon_ssl_policy" "my-ssl-policy" {
+resource "alteon_ssl_policy" "my_policy" {
   nameidindex         = "my-ssl-policy"
   cipher_name         = 1   # 1=user-defined
   cipher_userdef      = "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256:..."
@@ -260,15 +292,6 @@ resource "alteon_vrrp" "vr1" {
   state    = true
 }
 
-resource "alteon_vrrp" "vr2" {
-  index    = 2
-  vrid     = 20
-  addr     = "10.0.1.2"
-  if_index = 1
-  priority = 100
-  state    = true
-}
-
 resource "alteon_vrrp_group" "grp1" {
   index           = 1
   vrid            = 1
@@ -282,19 +305,19 @@ resource "alteon_vrrp_group" "grp1" {
 
 ```hcl
 resource "alteon_filter" "ssl_inspect" {
-  index              = 100
-  name               = "ssl-inspection"
-  action             = 3    # redirect
-  state              = 1    # enabled
-  protocol           = "6"  # TCP
-  range_low_dst_port = "443"
+  index               = 100
+  name                = "ssl-inspection"
+  action              = 3    # 3=redirect
+  state               = 1    # 1=enabled
+  protocol            = "6"  # TCP
+  range_low_dst_port  = "443"
   range_high_dst_port = "443"
-  ssl_inspection_ena = 1
-  ssl_policy         = "my-ssl-policy"
-  srv_cert_group     = 1    # 1=group
-  srv_cert           = "4"
-  ssl_l7_action      = 3    # inspect
-  log                = 1
+  ssl_inspection_ena  = 1
+  ssl_policy          = "my-ssl-policy"
+  srv_cert_group      = 1    # 1=group
+  srv_cert            = "4"
+  ssl_l7_action       = 3    # 3=inspect
+  log                 = 1
 }
 
 resource "alteon_filter_port" "port1" {
@@ -310,7 +333,7 @@ resource "alteon_filter_port" "port1" {
 resource "alteon_pip" "pip1" {
   address = "10.0.1.53"
   ports   = [1, 2]
-  vlans   = [100]
+  vlans   = [1898]
 }
 ```
 
@@ -359,9 +382,10 @@ resource "alteon_appshape_binding" "bind" {
 
 ```bash
 terraform import alteon_real_server.web1 15
+terraform import alteon_real_server_layer7.rs43_l7 43
 terraform import alteon_server_group.grp12 12
 terraform import alteon_virtual_server.vs1 1
-terraform import alteon_ssl_policy.hf my-ssl-policy
+terraform import alteon_ssl_policy.p my-ssl-policy
 terraform import alteon_http2_policy.h2 my-http2-policy
 terraform import alteon_advhc_http.web hc-web
 terraform import alteon_ssl_cert_group.grp4 4
@@ -369,6 +393,7 @@ terraform import alteon_filter.f100 100
 terraform import alteon_vrrp.vr1 1
 terraform import alteon_vrrp_group.grp1 1
 terraform import alteon_pip.pip1 10.0.1.53
+terraform import alteon_url_lb_path.p2 2
 ```
 
 ### Zweiteilige Keys
@@ -413,6 +438,7 @@ Mehrere Ressourcen nutzen deklarative Sets statt Add/Rem-Kommandos:
 | `alteon_ssl_cert_group` | `certificates` | Zertifikate in der Gruppe |
 | `alteon_pip` | `ports`, `vlans` | Port-/VLAN-Zuordnung |
 | `alteon_filter_port` | `filters` | Filter-Regeln auf dem Port |
+| `alteon_real_server_layer7` | `urls` | Layer7-URL-Pfad-Zuordnungen |
 
 Hinzufügen = Element in die Liste aufnehmen. Entfernen = rausnehmen.
 Terraform berechnet das Delta und feuert die passenden Add/Rem-Befehle.
@@ -423,7 +449,7 @@ Terraform berechnet das Delta und feuert die passenden Add/Rem-Befehle.
 
 Die meisten Felder nutzen numerische Enum-Werte (wie die REST-API).
 Ausnahmen: `server_group.metric` und `server_group.health_check_layer`
-akzeptieren Strings (`"leastconnections"`, `"tcp"`, `"icmp"` usw.).
+akzeptieren Strings.
 
 Häufige Werte:
 
@@ -436,9 +462,10 @@ Häufige Werte:
 | IP Version | 1=IPv4, 2=IPv6 |
 | SG Metric | roundrobin, leastconnections, minmisses, hash, response, bandwidth, phash, svcleast, hrw |
 | SG HealthLayer | icmp, tcp, http, dns, smtp, link, ldap |
+| URL Application | 1=http, 2=dns, 3=other |
 
-Im Zweifel: erst importieren, dann `terraform show` — die Ist-Werte als Zahlen
-können direkt ins HCL übernommen werden.
+Im Zweifel: erst importieren, dann `terraform show` — die Ist-Werte können
+direkt ins HCL übernommen werden.
 
 ---
 
@@ -454,13 +481,14 @@ können direkt ins HCL übernommen werden.
 
 ## Bekannte Einschränkungen
 
-- **Bitmap-Felder** (VirtServerRule, UrlBmap, PortsIngress/Egress) sind nicht als
-  deklarative Sets abgebildet. Können bei Bedarf ergänzt werden.
+- **Bitmap-Felder** (VirtServerRule, UrlBmap als Feld auf real_server, PortsIngress/Egress)
+  sind nicht direkt als deklarative Sets auf der Haupt-Ressource abgebildet. Für URL-
+  Zuordnungen gibt es die separate Ressource `alteon_real_server_layer7`.
+- **Bitmap-Nummerierung** ist 0-basiert (am Gerät verifiziert: VLAN 1898, nicht 1899).
+  Alle Bitmap-Sets (ports, vlans, filters, virtual_routers, certificates, urls)
+  verwenden die korrekte 0-basierte Nummerierung.
 - **AppShape-Skript-Inhalt** wird nicht verwaltet (kein REST-Endpunkt in der Doku).
-- **PIP-/Filter-Bitmap-Nummerierung** (MSB-first, 1-basiert) ist die übliche
-  Alteon-Konvention, sollte gegen bekannte Zuordnungen verifiziert werden.
 - **Content-Class-Aktivflags**: Es wird angenommen, dass sie beim Subtabellen-Write
   automatisch gesetzt werden.
-- Alteon ignoriert **Partial-PUTs** in manchen Kontexten und hat
-  **interdependente Felder** (z.B. HealthCheckLayer/HealthID). Updates senden daher
-  nur geänderte Felder (`HasChange`), um Widersprüche zu vermeiden.
+- Alteon hat **interdependente Felder** (z.B. HealthCheckLayer/HealthID). Updates
+  senden nur geänderte Felder (`HasChange`), um Widersprüche zu vermeiden.

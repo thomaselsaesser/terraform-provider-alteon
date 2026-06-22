@@ -36,6 +36,8 @@ func Provider() *schema.Provider {
 		},
 		ResourcesMap: map[string]*schema.Resource{
 			"alteon_real_server":        resource_alteon_real_server(),
+			"alteon_real_server_layer7": resource_alteon_real_server_layer7(),
+			"alteon_url_lb_path":        resource_alteon_url_lb_path(),
 			"alteon_server_group":       resource_alteon_server_group(),
 			"alteon_cli_command":        resource_alteon_cli_command(),
 			"alteon_apply":              resource_alteon_apply(),

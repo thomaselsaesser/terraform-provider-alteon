@@ -569,3 +569,32 @@ func sslCertSpec() flatSpec {
 func resource_alteon_ssl_cert() *schema.Resource {
 	return flatResourceFromSpec(sslCertSpec())
 }
+
+// --- URL LB Path (Layer 7 URL-Pfad-Definition) ------------------------------
+func urlLbPathSpec() flatSpec {
+	return flatSpec{
+		ResourceName: "alteon_url_lb_path",
+		Tables:       []string{"slbNewCfgUrlLbPathTable"},
+		KeySchema:    "index",
+		KeyType:      ftInt,
+		KeyAPIs:      []string{"Index"},
+		Fields: []flatField{
+			{"string_val", "StringVal", ftString},
+			{"dns_query_types", "DnsQueryTypes", ftString},
+			{"bwm_contract", "BwmContract", ftString},
+			{"http_header", "HTTPHeader", ftString},
+			{"http_header_value", "HTTPHeaderValue", ftString},
+			{"pattern_string_type", "PatternStringType", ftInt},
+			{"offset", "Offset", ftString},
+			{"depth", "Depth", ftString},
+			{"oper", "Oper", ftInt},
+			{"complete_string", "CompleteString", ftString},
+			{"allow_reg_exp", "AllowRegExp", ftInt},
+			{"dns_type", "DnsType", ftInt},
+			{"application", "Application", ftInt},
+		},
+	}
+}
+func resource_alteon_url_lb_path() *schema.Resource {
+	return flatResourceFromSpec(urlLbPathSpec())
+}

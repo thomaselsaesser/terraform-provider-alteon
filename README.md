@@ -1,4 +1,4 @@
-# terraform-provider-alteon — Erweiterung
+# terraform-provider-alteon — animate-Erweiterung
 
 Terraform-Provider für Radware Alteon Loadbalancer (REST-API, FW 34.0.9+).
 Erweitert den von Radware geclonten Provider um vollständiges CRUD über die
@@ -68,7 +68,20 @@ provider "alteon" {
 }
 ```
 
-Zugangsdaten per Umgebungsvariable: `ALTEON_IP`, `ALTEON_USERNAME`, `ALTEON_PASSWORD`.
+Zugangsdaten **nicht interaktiv eingeben** (Reihenfolge-Problem: Terraform fragt
+alphabetisch, also `password` vor `username`). Stattdessen per Umgebungsvariable:
+
+```bash
+export TF_VAR_alteon_username="admin"
+export TF_VAR_alteon_password="geheim"
+terraform plan
+```
+
+Oder direkt über Provider-Umgebungsvariablen (ohne variable-Blöcke):
+```bash
+export ALTEON_USERNAME="admin"
+export ALTEON_PASSWORD="geheim"
+```
 
 > Nach schreibenden Operationen braucht Alteon `alteon_apply` + `alteon_save`,
 > damit die Konfiguration aktiv und persistent wird.
@@ -167,7 +180,7 @@ Gemeinsame Felder aller HC-Typen: `name`, `dport`, `ip_version`, `host_name`,
 ### CLI-Command (Escape-Hatch für alles ohne eigene Ressource)
 
 ```hcl
-resource "alteon_cli_command" "real43_layer7" {
+resource "alteon_cli_command" "example" {
   agalteonclicommand = "/c/slb/real 43/layer7/exclude e/addlb 2"
 }
 ```
@@ -219,7 +232,7 @@ resource "alteon_virtual_service" "svc1" {
 }
 ```
 
-### Layer7-URL-Zuordnung (ersetzt cli_command)
+### Layer7-URL-Zuordnung
 
 ```hcl
 resource "alteon_url_lb_path" "health" {
@@ -314,7 +327,7 @@ resource "alteon_filter" "ssl_inspect" {
   range_high_dst_port = "443"
   ssl_inspection_ena  = 1
   ssl_policy          = "my-ssl-policy"
-  srv_cert_group      = 1    # 1=group
+  srv_cert_group      = 1
   srv_cert            = "4"
   ssl_l7_action       = 3    # 3=inspect
   log                 = 1
@@ -445,6 +458,25 @@ Terraform berechnet das Delta und feuert die passenden Add/Rem-Befehle.
 
 ---
 
+## Bitmap-Nummerierung
+
+Die Hex-Byte-Bitmaps (PortMap, VlanMap, FiltBmap, UrlBmap, Bmap, CertBmap)
+verwenden **unterschiedliche** Basis-Nummerierungen (am Gerät verifiziert):
+
+| Bitmap | Base | Begründung |
+|--------|------|-----------|
+| PIP VLANs | **0** | VLAN 1898 = Bit 1898 (verifiziert) |
+| PIP Ports | **1** | Physische Ports starten bei 1 |
+| Filter (FiltBmap) | **1** | Filter-Indizes starten bei 1 |
+| URLs (UrlBmap) | **1** | `addlb 2` = Bit 1, Dekodierung: Bit+1=2 (verifiziert) |
+| VR-Member (Bmap) | **1** | VR-Indizes starten bei 1 |
+| SSL Certs (CertBmap) | **1** | Cert-Indizes starten bei 1 |
+
+Regel: Alles, was bei 1 anfängt, bekommt `base=1`. Nur VLANs (VLAN 0 existiert
+im Bitmap-Raum) bekommen `base=0`.
+
+---
+
 ## Enum-Werte
 
 Die meisten Felder nutzen numerische Enum-Werte (wie die REST-API).
@@ -472,10 +504,11 @@ direkt ins HCL übernommen werden.
 ## Empfohlenes Vorgehen
 
 1. **Am Testpaar anfangen** — nicht produktiv
-2. **Importieren** (`terraform import`) + `terraform plan` → Plan muss leer sein
-3. Erst dann Änderungen via `terraform apply`
-4. `alteon_apply` + `alteon_save` als letzten Schritt einplanen
-5. Schrittweise ausrollen: erst eine VIP-Kette, dann weitere
+2. Zugangsdaten per `TF_VAR_*` Umgebungsvariablen setzen (nicht interaktiv)
+3. **Importieren** (`terraform import`) + `terraform plan` → Plan muss leer sein
+4. Erst dann Änderungen via `terraform apply`
+5. `alteon_apply` + `alteon_save` als letzten Schritt einplanen
+6. Schrittweise ausrollen: erst eine VIP-Kette, dann weitere
 
 ---
 
@@ -484,11 +517,11 @@ direkt ins HCL übernommen werden.
 - **Bitmap-Felder** (VirtServerRule, UrlBmap als Feld auf real_server, PortsIngress/Egress)
   sind nicht direkt als deklarative Sets auf der Haupt-Ressource abgebildet. Für URL-
   Zuordnungen gibt es die separate Ressource `alteon_real_server_layer7`.
-- **Bitmap-Nummerierung** ist 0-basiert (am Gerät verifiziert: VLAN 1898, nicht 1899).
-  Alle Bitmap-Sets (ports, vlans, filters, virtual_routers, certificates, urls)
-  verwenden die korrekte 0-basierte Nummerierung.
 - **AppShape-Skript-Inhalt** wird nicht verwaltet (kein REST-Endpunkt in der Doku).
 - **Content-Class-Aktivflags**: Es wird angenommen, dass sie beim Subtabellen-Write
   automatisch gesetzt werden.
 - Alteon hat **interdependente Felder** (z.B. HealthCheckLayer/HealthID). Updates
   senden nur geänderte Felder (`HasChange`), um Widersprüche zu vermeiden.
+- Das **Radware SDK** loggt HTTP-Header (inklusive Base64-kodierter Credentials)
+  auf stdout. Bei `TF_LOG=DEBUG` werden diese in den Logs sichtbar. Debug-Logs
+  nicht teilen oder speichern — sie enthalten die Alteon-Zugangsdaten.

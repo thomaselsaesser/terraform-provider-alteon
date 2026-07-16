@@ -42,7 +42,7 @@ func filterPortReadRules(client *radwaregosdk.New_Client, port string) (rules []
 		return nil, false, ok, d
 	}
 	if v, ok := item["FiltBmap"]; ok {
-		rules = decodeHexBitmap(asString(v))
+		rules = decodeHexBitmap(asString(v), 1)
 	}
 	if v, ok := item["State"]; ok {
 		state = enableToBool(v)

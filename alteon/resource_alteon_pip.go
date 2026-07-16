@@ -69,10 +69,10 @@ func pipReadMaps(client *radwaregosdk.New_Client, addr string) (ports, vlans []i
 		return nil, nil, ok, d
 	}
 	if v, ok := item["PortMap"]; ok {
-		ports = decodeHexBitmap(asString(v))
+		ports = decodeHexBitmap(asString(v), 1)
 	}
 	if v, ok := item["VlanMap"]; ok {
-		vlans = decodeHexBitmap(asString(v))
+		vlans = decodeHexBitmap(asString(v), 0)
 	}
 	return ports, vlans, true, diags
 }

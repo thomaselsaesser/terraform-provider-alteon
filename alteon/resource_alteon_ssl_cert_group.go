@@ -109,7 +109,7 @@ func sslGroupReadCerts(client *radwaregosdk.New_Client, groupID string) ([]int, 
 		return nil, diags
 	}
 	if v, ok := item["CertBmap"]; ok {
-		return decodeHexBitmap(asString(v)), nil
+		return decodeHexBitmap(asString(v), 1), nil
 	}
 	return nil, diags
 }

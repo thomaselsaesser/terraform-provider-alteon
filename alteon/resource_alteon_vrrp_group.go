@@ -137,7 +137,7 @@ func vrGrpReadMembers(client *radwaregosdk.New_Client, groupKey string) ([]int, 
 		return nil, diags
 	}
 	if v, ok := item["Bmap"]; ok {
-		return decodeHexBitmap(asString(v)), nil
+		return decodeHexBitmap(asString(v), 1), nil
 	}
 	return nil, diags
 }

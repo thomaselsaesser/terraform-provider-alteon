@@ -68,7 +68,7 @@ func rsL7ReadUrls(client *radwaregosdk.New_Client, rsKey string) (urls []int, ex
 	}
 	if found {
 		if v, ok := item2["UrlBmap"]; ok {
-			urls = decodeHexBitmap(asString(v))
+			urls = decodeHexBitmap(asString(v), 1)
 		}
 	}
 	// ExcludeStr aus Haupttabelle

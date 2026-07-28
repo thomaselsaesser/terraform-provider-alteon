@@ -272,7 +272,7 @@ resource "alteon_ssl_cert_group" "grp4" {
   group_id     = "4"
   name         = "my-intermediate-certs"
   type         = 5            # 5=intermediate
-  certificates = [1, 2, 3]   # deklarative Cert-Index-Liste
+  certificates = ["cert-a", "cert-b"]   # Cert-NAMEN (Strings, nicht Indizes)
 }
 ```
 
@@ -448,7 +448,7 @@ Mehrere Ressourcen nutzen deklarative Sets statt Add/Rem-Kommandos:
 |-----------|------|--------------|
 | `alteon_server_group` | `servers` | Real-Server-Mitglieder |
 | `alteon_vrrp_group` | `virtual_routers` | VR-Mitglieder |
-| `alteon_ssl_cert_group` | `certificates` | Zertifikate in der Gruppe |
+| `alteon_ssl_cert_group` | `certificates` | Zertifikate in der Gruppe (Cert-Namen als Strings) |
 | `alteon_pip` | `ports`, `vlans` | Port-/VLAN-Zuordnung |
 | `alteon_filter_port` | `filters` | Filter-Regeln auf dem Port |
 | `alteon_real_server_layer7` | `urls` | Layer7-URL-Pfad-Zuordnungen |
@@ -519,6 +519,10 @@ direkt ins HCL übernommen werden.
   Zuordnungen gibt es die separate Ressource `alteon_real_server_layer7`.
 - **AppShape-Skript-Inhalt** wird nicht verwaltet (kein REST-Endpunkt in der Doku).
 - **Content-Class-Aktivflags**: Es wird angenommen, dass sie beim Subtabellen-Write
+- **SSL Cert Group Members**: Die CertBmap kodiert interne Positionen, nicht
+  Cert-Namen. Daher werden Mitglieder über `AddCert`/`RemCert` mit dem Cert-Namen
+  verwaltet (Strings, z.B. `["4", "my-server-cert.example.de"]`). Drift-Detection
+  auf Cert-Mitgliedschaft ist nicht möglich — die Liste bleibt wie konfiguriert.
   automatisch gesetzt werden.
 - Alteon hat **interdependente Felder** (z.B. HealthCheckLayer/HealthID). Updates
   senden nur geänderte Felder (`HasChange`), um Widersprüche zu vermeiden.

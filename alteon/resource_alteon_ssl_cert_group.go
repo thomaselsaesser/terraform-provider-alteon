@@ -13,8 +13,14 @@ import (
 // (slbNewSslCfgGroupsTable) mit deklarativer Zertifikats-Mitgliederliste.
 //
 // Tabelle: slbNewSslCfgGroupsTable, Key: ID (String).
-// Mitglieder: CertBmap (Hex-Bitmap), AddCert/RemCert (Kommandos).
+// Mitglieder: AddCert/RemCert (Kommandos) mit CERT-NAMEN (Strings).
 // Type: 3=serverCertificate, 4=trustedCertificate, 5=intermediateCertificate.
+//
+// WICHTIG: Die CertBmap (Hex-Bitmap) kodiert INTERNE Positionen, die NICHT
+// mit den Cert-Namen korrelieren. Daher wird die Bitmap NICHT zum Lesen der
+// Mitglieder verwendet. Die Mitgliederliste bleibt wie konfiguriert im State
+// (kein Drift-Detection auf Cert-Members). Schreiben ueber AddCert/RemCert
+// mit dem korrekten Cert-Namen funktioniert einwandfrei.
 
 const sslGroupTable = "slbNewSslCfgGroupsTable"
 
@@ -63,8 +69,8 @@ func resource_alteon_ssl_cert_group() *schema.Resource {
 			"certificates": {
 				Type:        schema.TypeSet,
 				Optional:    true,
-				Elem:        &schema.Schema{Type: schema.TypeInt},
-				Description: "Complete set of certificate indices in this group (declarative). Uses CertBmap/AddCert/RemCert.",
+				Elem:        &schema.Schema{Type: schema.TypeString},
+				Description: "Set of certificate names/IDs in this group (e.g. [\"3\", \"4\"] or [\"wahlenweb.intern.hessen.de\"]). Uses AddCert/RemCert with the cert name.",
 			},
 			"last_updated": {
 				Type:     schema.TypeString,
@@ -102,33 +108,41 @@ func sslGroupHeadPayload(d *schema.ResourceData, create bool) map[string]interfa
 	return p
 }
 
-func sslGroupReadCerts(client *radwaregosdk.New_Client, groupID string) ([]int, diag.Diagnostics) {
-	api := configPath(sslGroupTable, groupID)
-	item, found, diags := readItem(client, api, sslGroupTable)
-	if diags.HasError() || !found {
-		return nil, diags
+// sslGroupWantCerts gibt die konfigurierte Cert-Liste als String-Slice zurueck.
+func sslGroupWantCerts(d *schema.ResourceData) []string {
+	raw := d.Get("certificates").(*schema.Set).List()
+	out := make([]string, 0, len(raw))
+	for _, v := range raw {
+		out = append(out, v.(string))
 	}
-	if v, ok := item["CertBmap"]; ok {
-		return decodeHexBitmap(asString(v), 1), nil
-	}
-	return nil, diags
+	return out
 }
 
-func sslGroupApplyCertDelta(client *radwaregosdk.New_Client, groupID string, want []int) diag.Diagnostics {
-	have, diags := sslGroupReadCerts(client, groupID)
-	if diags.HasError() {
-		return diags
-	}
-	add, rem := setDelta(want, have)
+// sslGroupApplyCertDelta berechnet Delta und feuert AddCert/RemCert.
+func sslGroupApplyCertDelta(client *radwaregosdk.New_Client, groupID string, oldCerts, newCerts []string) diag.Diagnostics {
 	api := configPath(sslGroupTable, groupID)
-	for _, c := range add {
-		if dd := writeItem(client, api, map[string]interface{}{"AddCert": c}, false); dd.HasError() {
-			return dd
+	oldSet := map[string]bool{}
+	newSet := map[string]bool{}
+	for _, c := range oldCerts {
+		oldSet[c] = true
+	}
+	for _, c := range newCerts {
+		newSet[c] = true
+	}
+	// Hinzufuegen: in new aber nicht in old.
+	for c := range newSet {
+		if !oldSet[c] {
+			if dd := writeItem(client, api, map[string]interface{}{"AddCert": c}, false); dd.HasError() {
+				return dd
+			}
 		}
 	}
-	for _, c := range rem {
-		if dd := writeItem(client, api, map[string]interface{}{"RemCert": c}, false); dd.HasError() {
-			return dd
+	// Entfernen: in old aber nicht in new.
+	for c := range oldSet {
+		if !newSet[c] {
+			if dd := writeItem(client, api, map[string]interface{}{"RemCert": c}, false); dd.HasError() {
+				return dd
+			}
 		}
 	}
 	return nil
@@ -142,9 +156,13 @@ func resource_alteon_ssl_cert_group_create(ctx context.Context, d *schema.Resour
 		return diags
 	}
 	d.SetId(id)
+	// Certs hinzufuegen.
 	if v, ok := d.GetOk("certificates"); ok {
-		want := interfaceListToInts(v.(*schema.Set).List())
-		if diags := sslGroupApplyCertDelta(client, id, want); diags.HasError() {
+		certs := make([]string, 0)
+		for _, c := range v.(*schema.Set).List() {
+			certs = append(certs, c.(string))
+		}
+		if diags := sslGroupApplyCertDelta(client, id, nil, certs); diags.HasError() {
 			return diags
 		}
 	}
@@ -179,11 +197,9 @@ func resource_alteon_ssl_cert_group_read(ctx context.Context, d *schema.Resource
 	if v, ok := item["ChainingMode"]; ok {
 		d.Set("chaining_mode", asInt(v))
 	}
-	certs, cdiags := sslGroupReadCerts(client, id)
-	if cdiags.HasError() {
-		return cdiags
-	}
-	d.Set("certificates", certs)
+	// Cert-Members werden NICHT aus der Bitmap gelesen (interne Positionen,
+	// nicht Cert-Namen). Die Liste bleibt wie konfiguriert im State.
+	// Drift-Detection auf Cert-Members ist damit nicht moeglich.
 	return diags
 }
 
@@ -198,8 +214,16 @@ func resource_alteon_ssl_cert_group_update(ctx context.Context, d *schema.Resour
 		}
 	}
 	if d.HasChange("certificates") {
-		want := interfaceListToInts(d.Get("certificates").(*schema.Set).List())
-		if diags := sslGroupApplyCertDelta(client, id, want); diags.HasError() {
+		old, nw := d.GetChange("certificates")
+		oldCerts := make([]string, 0)
+		newCerts := make([]string, 0)
+		for _, c := range old.(*schema.Set).List() {
+			oldCerts = append(oldCerts, c.(string))
+		}
+		for _, c := range nw.(*schema.Set).List() {
+			newCerts = append(newCerts, c.(string))
+		}
+		if diags := sslGroupApplyCertDelta(client, id, oldCerts, newCerts); diags.HasError() {
 			return diags
 		}
 	}
